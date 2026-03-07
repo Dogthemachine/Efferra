@@ -1,0 +1,67 @@
+# --------------------------------------------
+# OS / Editor
+# --------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --------------------------------------------
+# Python / Django
+# --------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+pip-wheel-metadata/
+*.log
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Django runtime files
+db.sqlite3
+*.sqlite3
+staticfiles/
+media/
+uploads/
+
+# Local settings / secrets
+.env
+.env.*
+*.env
+local_settings.py
+settings.local.py
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# --------------------------------------------
+# Node / Nuxt / pnpm
+# --------------------------------------------
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.pnp.*
+.nuxt/
+.output/
+dist/
+.cache/
+*.tsbuildinfo
+
