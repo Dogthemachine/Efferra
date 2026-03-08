@@ -1,0 +1,57 @@
+name: Publish sanitized mirror to public repo
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure SSH for pushing to public repo
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PUBLIC_REPO_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
+      - name: Create sanitized export (remove sensitive files)
+        run: |
+          # Remove sensitive docs from the export
+          rm -f CLAUDE.md ENVIRONMENT.md PAYMENTS.md PLAN.md || true
+
+          # Remove env files if any
+          rm -f .env .env.* || true
+
+          # If you later add a private docs folder, exclude it here:
+          # rm -rf private_docs || true
+
+          # Safety: ensure nothing sensitive remains
+          find . -maxdepth 2 -type f -name "*.env" -print -delete || true
+
+      - name: Push to public repo (force update)
+        env:
+          PUBLIC_REPO_SSH_URL: ${{ secrets.PUBLIC_REPO_SSH_URL }}
+        run: |
+          git config user.name "efferra-mirror-bot"
+          git config user.email "efferra-mirror-bot@users.noreply.github.com"
+
+          # Add public remote and push main as a mirror export
+          git remote add public "$PUBLIC_REPO_SSH_URL"
+
+          # Commit the removal in the CI workspace (not affecting private repo history)
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+          else
+            git commit -m "Public mirror update (sanitized)"
+          fi
+
+          # Force push to public/main so public stays in sync
+          git push --force public HEAD:main
