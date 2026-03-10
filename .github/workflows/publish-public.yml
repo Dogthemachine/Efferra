@@ -2,7 +2,8 @@ name: Publish sanitized mirror to public repo
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
   publish:
@@ -15,43 +16,69 @@ jobs:
           fetch-depth: 0
 
       - name: Configure SSH for pushing to public repo
+        shell: bash
         run: |
+          set -e
           mkdir -p ~/.ssh
           echo "${{ secrets.PUBLIC_REPO_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H github.com >> ~/.ssh/known_hosts
 
-      - name: Create sanitized export (remove sensitive files)
-        run: |
-          # Remove sensitive docs from the export
-          rm -f CLAUDE.md ENVIRONMENT.md PAYMENTS.md PLAN.md || true
-
-          # Remove env files if any
-          rm -f .env .env.* || true
-
-          # If you later add a private docs folder, exclude it here:
-          # rm -rf private_docs || true
-
-          # Safety: ensure nothing sensitive remains
-          find . -maxdepth 2 -type f -name "*.env" -print -delete || true
-
-      - name: Push to public repo (force update)
+      - name: Validate required secrets
+        shell: bash
         env:
           PUBLIC_REPO_SSH_URL: ${{ secrets.PUBLIC_REPO_SSH_URL }}
         run: |
+          set -e
+          if [ -z "${PUBLIC_REPO_SSH_URL}" ]; then
+            echo "ERROR: PUBLIC_REPO_SSH_URL secret is missing or empty"
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.PUBLIC_REPO_DEPLOY_KEY }}" ]; then
+            echo "ERROR: PUBLIC_REPO_DEPLOY_KEY secret is missing or empty"
+            exit 1
+          fi
+
+      - name: Create sanitized export
+        shell: bash
+        run: |
+          set -e
+
+          # Remove internal docs from public mirror
+          rm -f CLAUDE.md ENVIRONMENT.md PAYMENTS.md PLAN.md || true
+
+          # Remove env files if any accidentally exist in repo
+          rm -f .env .env.* || true
+
+          # Optional future private folders/files:
+          # rm -rf private_docs .claude || true
+
+      - name: Commit sanitized state if needed
+        shell: bash
+        run: |
+          set -e
           git config user.name "efferra-mirror-bot"
           git config user.email "efferra-mirror-bot@users.noreply.github.com"
 
-          # Add public remote and push main as a mirror export
-          git remote add public "$PUBLIC_REPO_SSH_URL"
-
-          # Commit the removal in the CI workspace (not affecting private repo history)
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to publish."
+            echo "No sanitized changes to commit."
           else
             git commit -m "Public mirror update (sanitized)"
           fi
 
-          # Force push to public/main so public stays in sync
+      - name: Push sanitized mirror to public repo
+        shell: bash
+        env:
+          PUBLIC_REPO_SSH_URL: ${{ secrets.PUBLIC_REPO_SSH_URL }}
+        run: |
+          set -e
+
+          git remote remove public 2>/dev/null || true
+          git remote add public "${PUBLIC_REPO_SSH_URL}"
+
+          echo "Configured remotes:"
+          git remote -v
+
           git push --force public HEAD:main
