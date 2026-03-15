@@ -44,6 +44,7 @@ uploads/
 .env
 .env.*
 *.env
+!.env.example
 local_settings.py
 settings.local.py
 
