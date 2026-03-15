@@ -1,0 +1,18 @@
+[project]
+name = "efferra-backend"
+version = "0.1.0"
+description = "Django backend for Efferra luxury candle webshop"
+authors = [
+    {name = "Efferra",email = "dev@efferra.com"}
+]
+readme = "README.md"
+requires-python = "^3.10"
+dependencies = [
+    "django (>=5.1,<6.0)",
+    "django-environ (>=0.12,<0.13)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
