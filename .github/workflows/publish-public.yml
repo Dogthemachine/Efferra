@@ -51,8 +51,11 @@ jobs:
           # Remove env files if any accidentally exist in repo
           rm -f .env .env.* || true
 
-          # Optional future private folders/files:
-          # rm -rf private_docs .claude || true
+          # Remove private-only GitHub workflows from public mirror
+          rm -rf .github/workflows || true
+
+          # Optional future private-only folders:
+          # rm -rf .claude/private private_docs || true
 
       - name: Commit sanitized state if needed
         shell: bash
