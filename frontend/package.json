@@ -1,0 +1,22 @@
+{
+  "name": "efferra-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "nuxt": "^3.17.2",
+    "vue": "^3.5.16",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@nuxtjs/i18n": "^9.5.3",
+    "typescript": "^5.8.3"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

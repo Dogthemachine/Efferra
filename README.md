@@ -4,10 +4,10 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 
 ## Current status
 
-**Phase 0 — Backend bootstrap complete.**
+**Phase 0 — Backend bootstrap + Frontend bootstrap complete.**
 
 - Django backend initialized in `backend/`.
-- Frontend (Nuxt) is not yet initialized.
+- Nuxt frontend initialized in `frontend/` with i18n skeleton (4 locales).
 - No production deployment configuration exists yet.
 
 ## Stack
@@ -15,7 +15,7 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 | Layer    | Technology           | Status      |
 |----------|----------------------|-------------|
 | Backend  | Django 5.2 / Python  | Initialized |
-| Frontend | Nuxt                 | Not started |
+| Frontend | Nuxt 3.x / pnpm     | Initialized |
 | Database | PostgreSQL (target)  | SQLite used for bootstrap |
 | Payments | Mollie               | Not started |
 
@@ -30,21 +30,60 @@ Efferra/
 │   ├── pyproject.toml      # Python dependencies (Poetry)
 │   ├── poetry.lock         # Locked dependency versions
 │   └── .env.example        # Environment variable template
-├── .claude/skills/          # Project-level Claude Code skills
+├── frontend/               # Nuxt frontend (pnpm-managed)
+│   ├── app.vue             # Root Vue component
+│   ├── pages/              # Nuxt file-based routing
+│   │   └── index.vue       # Home page (with i18n demo)
+│   ├── i18n/
+│   │   └── locales/        # Locale JSON files
+│   │       ├── nl.json     # Dutch (default locale)
+│   │       ├── en.json     # English
+│   │       ├── de.json     # German
+│   │       └── fr.json     # French
+│   ├── nuxt.config.ts      # Nuxt configuration (i18n module configured)
+│   ├── package.json        # Node dependencies (pnpm)
+│   ├── pnpm-lock.yaml      # Locked dependency versions
+│   ├── .node-version       # Node version hint (24)
+│   └── .env.example        # Environment variable template
+├── .claude/skills/         # Project-level Claude Code skills
 ├── CLAUDE.md               # Project contract and constraints
-├── ENVIRONMENT.md           # Deployment environment specification
-├── PAYMENTS.md              # Payment integration specification
-├── PLAN.md                  # Development plan
-├── Makefile                 # Repository-level commands
-└── README.md                # This file
+├── ENVIRONMENT.md          # Deployment environment specification
+├── PAYMENTS.md             # Payment integration specification
+├── PLAN.md                 # Development plan
+├── Makefile                # Repository-level commands
+└── README.md               # This file
 ```
 
-## Backend setup
+## Prerequisites
 
-### Prerequisites
+### Backend
 
 - **Python 3.10+** — Django 5.2 requires Python 3.10 or later.
 - **Poetry 2.x** — Python dependency manager.
+
+### Frontend
+
+- **Node.js 24.x** — The project uses Node 24. A `.node-version` file is provided in `frontend/` for version managers (nvm, fnm, etc.).
+- **pnpm** — Node dependency manager. Installed via corepack (ships with Node.js).
+
+## Installing pnpm
+
+pnpm is activated through Node.js corepack:
+
+```bash
+corepack enable
+corepack prepare pnpm@latest --activate
+```
+
+Verify installation:
+
+```bash
+pnpm --version
+```
+
+**Do not use npm or yarn for frontend dependencies.** pnpm is the only authorized Node package manager for this project.
+
+## Backend setup
 
 ### Installing Poetry
 
@@ -83,19 +122,18 @@ Or activate the shell:
 poetry shell
 ```
 
-### Environment configuration
+### Backend environment configuration
 
 Copy the example environment file:
 
 ```bash
+cd backend
 cp .env.example .env
 ```
 
 Edit `.env` with your local settings. The defaults work for basic local development (SQLite database, debug mode on).
 
-**Real `.env` files are never committed to git.** Only `.env.example` (with safe placeholder values) belongs in version control.
-
-### Running the development server
+### Running the backend
 
 ```bash
 cd backend
@@ -105,27 +143,91 @@ poetry run python manage.py runserver
 
 The server starts at `http://localhost:8000/`.
 
-### Available endpoints
+### Available backend endpoints
 
 | Endpoint          | Description           |
 |-------------------|-----------------------|
 | `/api/health/`    | Health check (JSON)   |
 | `/admin/`         | Django admin          |
 
-### Using the Makefile
+## Frontend setup
+
+### Installing frontend dependencies
+
+```bash
+cd frontend
+pnpm install
+```
+
+### Frontend environment configuration
+
+```bash
+cd frontend
+cp .env.example .env
+```
+
+### Running the Nuxt development server
+
+```bash
+cd frontend
+pnpm dev
+```
+
+The dev server starts at `http://localhost:3000/`.
+
+Routes are prefixed by locale: `/nl/`, `/en/`, `/de/`, `/fr/`. The default locale is Dutch (`nl`).
+
+### Building the static site
+
+```bash
+cd frontend
+pnpm generate
+```
+
+Output is written to `frontend/.output/public/` and can be served by any static file server.
+
+## Using the Makefile
 
 From the repository root:
 
 ```bash
-make setup        # Install backend dependencies
-make dev          # Run Django dev server
-make migrate      # Run database migrations
-make check        # Run Django system checks
+make setup            # Install both backend and frontend dependencies
+make setup-backend    # Install backend dependencies only
+make setup-frontend   # Install frontend dependencies only
+make dev              # Print instructions for running dev servers
+make dev-backend      # Run Django dev server (localhost:8000)
+make dev-frontend     # Run Nuxt dev server (localhost:3000)
+make migrate          # Run Django database migrations
+make check            # Run Django system checks
+make build-frontend   # Generate static Nuxt site
 ```
+
+## i18n setup
+
+The frontend uses `@nuxtjs/i18n` with 4 locales configured:
+
+| Code | Language | Route prefix |
+|------|----------|-------------|
+| `nl` | Dutch (default) | `/nl/` |
+| `en` | English | `/en/` |
+| `de` | German | `/de/` |
+| `fr` | French | `/fr/` |
+
+Locale files are in `frontend/i18n/locales/`. Currently they contain placeholder UI strings only. Real translations and product content are not implemented yet.
+
+The i18n strategy is `prefix` — all routes include a locale prefix. The default locale is `nl` (Netherlands-first).
+
+## Environment files
+
+Real `.env` files are **never committed to git.** Only `.env.example` files (with safe placeholder values) belong in version control. The `.gitignore` enforces this.
+
+## Python version
+
+Python 3.10+ is required. Django 5.2 (LTS) supports Python 3.10–3.13. The project uses `^3.10` in `pyproject.toml` to support any compatible Python 3.10+ version available on the developer's machine.
 
 ## What is intentionally not done yet
 
-- Nuxt frontend initialization
+- Frontend-to-backend API bridge / dev proxy
 - PostgreSQL database wiring (SQLite used for bootstrap)
 - Redis / Celery setup
 - Mollie payment integration
@@ -134,7 +236,5 @@ make check        # Run Django system checks
 - User authentication / social login
 - Production deployment configuration
 - Docker / containerization
-
-## Python version
-
-Python 3.10+ is required. Django 5.2 (LTS) supports Python 3.10–3.13. The project uses `^3.10` in `pyproject.toml` to support any compatible Python 3.10+ version available on the developer's machine.
+- Full i18n content translation
+- Analytics / GDPR compliance tools
