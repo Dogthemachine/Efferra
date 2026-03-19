@@ -30,6 +30,7 @@ Efferra/
 │   ├── pyproject.toml      # Python dependencies (Poetry)
 │   ├── poetry.lock         # Locked dependency versions
 │   └── .env.example        # Environment variable template
+├── .claude/skills/          # Project-level Claude Code skills
 ├── CLAUDE.md               # Project contract and constraints
 ├── ENVIRONMENT.md           # Deployment environment specification
 ├── PAYMENTS.md              # Payment integration specification
