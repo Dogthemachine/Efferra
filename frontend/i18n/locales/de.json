@@ -1,4 +1,8 @@
 {
   "welcome": "Willkommen bei Efferra",
-  "description": "Luxuriöse künstlerische Kerzen — Platzhalter"
+  "description": "Luxuriöse künstlerische Kerzen — Platzhalter",
+  "backendStatus": "Backend-Status",
+  "backendLoading": "Laden…",
+  "backendError": "Fehler",
+  "backendResult": "Status"
 }
