@@ -4,10 +4,11 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 
 ## Current status
 
-**Phase 0 — Backend bootstrap + Frontend bootstrap complete.**
+**Phase 0 — Backend bootstrap + Frontend bootstrap + API bridge complete.**
 
 - Django backend initialized in `backend/`.
 - Nuxt frontend initialized in `frontend/` with i18n skeleton (4 locales).
+- Frontend-to-backend API bridge established via Nuxt dev proxy.
 - No production deployment configuration exists yet.
 
 ## Stack
@@ -225,9 +226,24 @@ Real `.env` files are **never committed to git.** Only `.env.example` files (wit
 
 Python 3.10+ is required. Django 5.2 (LTS) supports Python 3.10–3.13. The project uses `^3.10` in `pyproject.toml` to support any compatible Python 3.10+ version available on the developer's machine.
 
+## Local API bridge
+
+During local development, the Nuxt dev server proxies all `/api/*` requests to the Django backend. This is configured via Nitro's `devProxy` in `nuxt.config.ts`.
+
+- **Frontend**: `http://localhost:3000` (Nuxt dev server)
+- **Backend**: `http://localhost:8000` (Django runserver)
+- **Proxy rule**: `GET http://localhost:3000/api/health/` → `GET http://localhost:8000/api/health/`
+
+The proxy target is controlled by the `NUXT_PUBLIC_API_BASE_URL` environment variable (default: `http://localhost:8000`). See `frontend/.env.example`.
+
+To verify the bridge works:
+
+1. Start both servers (`make dev-backend` and `make dev-frontend` in separate terminals).
+2. Visit `http://localhost:3000/nl/` — the page should show "Backend status" with "Status: ok".
+3. Or: `curl http://localhost:3000/api/health/` — should return `{"status": "ok"}`.
+
 ## What is intentionally not done yet
 
-- Frontend-to-backend API bridge / dev proxy
 - PostgreSQL database wiring (SQLite used for bootstrap)
 - Redis / Celery setup
 - Mollie payment integration

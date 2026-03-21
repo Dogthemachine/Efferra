@@ -1,4 +1,8 @@
 {
   "welcome": "Bienvenue chez Efferra",
-  "description": "Bougies artistiques de luxe — placeholder"
+  "description": "Bougies artistiques de luxe — placeholder",
+  "backendStatus": "Statut du backend",
+  "backendLoading": "Chargement…",
+  "backendError": "Erreur",
+  "backendResult": "Statut"
 }

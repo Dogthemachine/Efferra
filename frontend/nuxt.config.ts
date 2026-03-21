@@ -7,6 +7,21 @@ export default defineNuxtConfig({
     '@nuxtjs/i18n',
   ],
 
+  runtimeConfig: {
+    public: {
+      apiBaseUrl: 'http://localhost:8000',
+    },
+  },
+
+  nitro: {
+    devProxy: {
+      '/api/': {
+        target: (process.env.NUXT_PUBLIC_API_BASE_URL || 'http://localhost:8000') + '/api/',
+        changeOrigin: true,
+      },
+    },
+  },
+
   i18n: {
     locales: [
       { code: 'nl', language: 'nl-NL', name: 'Nederlands', file: 'nl.json' },

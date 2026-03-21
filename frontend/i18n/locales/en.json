@@ -1,4 +1,8 @@
 {
   "welcome": "Welcome to Efferra",
-  "description": "Luxury artistic candles — placeholder"
+  "description": "Luxury artistic candles — placeholder",
+  "backendStatus": "Backend status",
+  "backendLoading": "Loading…",
+  "backendError": "Error",
+  "backendResult": "Status"
 }
