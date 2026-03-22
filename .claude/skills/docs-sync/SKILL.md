@@ -52,6 +52,7 @@ allowed-tools:
 4. When removing a feature or changing behavior, update all affected docs — not just one.
 5. Project-level skills (`.claude/skills/`) are part of the repo. If a skill references a workflow that changes, update the skill too.
 6. Docs in the private repo (`CLAUDE.md`, `ENVIRONMENT.md`, `PAYMENTS.md`, `PLAN.md`) are excluded from the public mirror. `README.md` appears in both repos — ensure it makes sense without the private docs.
+7. **Voice:** Use "we/our" or neutral/impersonal phrasing in docs. Do not use "you/your" — this is a team project, not a tutorial addressing an outsider.
 
 ## Verification
 
