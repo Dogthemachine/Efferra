@@ -1,18 +1,15 @@
-[project]
+[tool.poetry]
 name = "efferra-backend"
 version = "0.1.0"
 description = "Django backend for Efferra luxury candle webshop"
-authors = [
-    {name = "Efferra",email = "dev@efferra.com"}
-]
-readme = "README.md"
-requires-python = "^3.10"
-dependencies = [
-    "django (>=5.1,<6.0)",
-    "django-environ (>=0.12,<0.13)",
-    "psycopg[binary] (>=3.1,<4.0)"
-]
+authors = ["Efferra <dev@efferra.com>"]
+package-mode = false
 
+[tool.poetry.dependencies]
+python = "^3.10"
+django = ">=5.1,<6.0"
+django-environ = ">=0.12,<0.13"
+psycopg = {version = ">=3.1,<4.0", extras = ["binary"]}
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
