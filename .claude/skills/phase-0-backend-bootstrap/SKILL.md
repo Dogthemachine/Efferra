@@ -41,8 +41,9 @@ All backend work happens in `backend/`. Do not create Django files outside this 
 
 - Health endpoint: `GET /api/health/` returning JSON with service status.
 - Use Django's `INSTALLED_APPS` for app registration.
-- Keep settings env-driven using `os.environ.get()` or a config library.
-- SQLite is acceptable during bootstrap; PostgreSQL is the target for later phases.
+- Keep settings env-driven using `django-environ` (already configured in `config/settings.py`).
+- PostgreSQL is the local development database. The `DATABASE_URL` environment variable controls the connection (see `backend/.env.example`).
+- Do not use `-s` (superuser) when creating the local PostgreSQL role. A normal role owning the database is sufficient.
 
 ## Makefile integration
 

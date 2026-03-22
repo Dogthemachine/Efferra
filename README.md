@@ -61,7 +61,7 @@ Efferra/
 
 - **Python 3.10+** — Django 5.2 requires Python 3.10 or later.
 - **Poetry 2.x** — Python dependency manager.
-- **PostgreSQL** — Local PostgreSQL server (e.g., Homebrew `postgresql@17` on macOS, or system package on Linux).
+- **PostgreSQL** — A running local PostgreSQL server. Install it however you prefer (Homebrew, system package, Postgres.app, etc.).
 
 ### Frontend
 
@@ -126,19 +126,12 @@ poetry shell
 
 ### PostgreSQL setup
 
-The backend requires a local PostgreSQL database. Install PostgreSQL if you haven't already:
-
-**macOS (Homebrew):**
-
-```bash
-brew install postgresql@17
-brew services start postgresql@17
-```
+The backend requires a local PostgreSQL database. Install PostgreSQL however suits your platform (Homebrew, system package, Postgres.app, etc.) and ensure the server is running.
 
 **Create the database and role:**
 
 ```bash
-createuser -s efferra
+createuser efferra
 createdb -O efferra efferra
 ```
 
