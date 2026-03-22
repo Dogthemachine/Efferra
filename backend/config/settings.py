@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env(
     DEBUG=(bool, True),
     ALLOWED_HOSTS=(list, []),
-    DATABASE_URL=(str, "postgres://efferra:efferra@localhost:5432/efferra"),
+    DATABASE_URL=(str, "postgres://efferra@localhost:5432/efferra"),
     LANGUAGE_CODE=(str, "en-us"),
     TIME_ZONE=(str, "Europe/Amsterdam"),
 )

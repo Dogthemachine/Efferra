@@ -61,7 +61,7 @@ Efferra/
 
 - **Python 3.10+** — Django 5.2 requires Python 3.10 or later.
 - **Poetry 2.x** — Python dependency manager.
-- **PostgreSQL** — A running local PostgreSQL server. Install it however you prefer (Homebrew, system package, Postgres.app, etc.).
+- **PostgreSQL** — A running local PostgreSQL server. Install however preferred (Homebrew, system package, Postgres.app, etc.).
 
 ### Frontend
 
@@ -126,7 +126,7 @@ poetry shell
 
 ### PostgreSQL setup
 
-The backend requires a local PostgreSQL database. Install PostgreSQL however suits your platform (Homebrew, system package, Postgres.app, etc.) and ensure the server is running.
+The backend requires a local PostgreSQL database. Install PostgreSQL however suits our platform (Homebrew, system package, Postgres.app, etc.) and ensure the server is running.
 
 **Create the database and role:**
 
@@ -141,7 +141,7 @@ Verify the connection:
 psql -U efferra -d efferra -c "SELECT 1;"
 ```
 
-The default `DATABASE_URL` in `.env.example` expects a database named `efferra` owned by a role named `efferra`. Adjust these values in your `.env` if your local setup differs.
+The default `DATABASE_URL` in `.env.example` uses a passwordless local connection (`postgres://efferra@localhost:5432/efferra`). This works if the local PostgreSQL authentication configuration allows passwordless access for that role. If the setup requires a password, set one on the role and update `DATABASE_URL` in the local `.env`.
 
 ### Backend environment configuration
 
@@ -152,7 +152,7 @@ cd backend
 cp .env.example .env
 ```
 
-Edit `.env` with your local settings. The `DATABASE_URL` must point to your local PostgreSQL instance. See `.env.example` for the expected format.
+Edit `.env` with local settings. The `DATABASE_URL` must point to the local PostgreSQL instance. See `.env.example` for the expected format.
 
 ### Running the backend
 
@@ -272,7 +272,7 @@ Redis is part of the agreed architecture for background job processing (Celery t
 
 **Redis is not required to run the backend at the current stage.** No Celery tasks or Redis-dependent code exists yet.
 
-When Redis is needed (Phase 3 — Payments), you will need a local Redis server:
+When Redis is needed (Phase 3 — Payments), a local Redis server will be required:
 
 **macOS (Homebrew):**
 
