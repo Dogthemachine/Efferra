@@ -17,7 +17,7 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 |----------|----------------------|-------------|
 | Backend  | Django 5.2 / Python  | Initialized |
 | Frontend | Nuxt 3.x / pnpm     | Initialized |
-| Database | PostgreSQL (target)  | SQLite used for bootstrap |
+| Database | PostgreSQL           | Configured for local dev  |
 | Payments | Mollie               | Not started |
 
 ## Repository structure
@@ -61,6 +61,7 @@ Efferra/
 
 - **Python 3.10+** — Django 5.2 requires Python 3.10 or later.
 - **Poetry 2.x** — Python dependency manager.
+- **PostgreSQL** — Local PostgreSQL server (e.g., Homebrew `postgresql@17` on macOS, or system package on Linux).
 
 ### Frontend
 
@@ -123,6 +124,32 @@ Or activate the shell:
 poetry shell
 ```
 
+### PostgreSQL setup
+
+The backend requires a local PostgreSQL database. Install PostgreSQL if you haven't already:
+
+**macOS (Homebrew):**
+
+```bash
+brew install postgresql@17
+brew services start postgresql@17
+```
+
+**Create the database and role:**
+
+```bash
+createuser -s efferra
+createdb -O efferra efferra
+```
+
+Verify the connection:
+
+```bash
+psql -U efferra -d efferra -c "SELECT 1;"
+```
+
+The default `DATABASE_URL` in `.env.example` expects a database named `efferra` owned by a role named `efferra`. Adjust these values in your `.env` if your local setup differs.
+
 ### Backend environment configuration
 
 Copy the example environment file:
@@ -132,7 +159,7 @@ cd backend
 cp .env.example .env
 ```
 
-Edit `.env` with your local settings. The defaults work for basic local development (SQLite database, debug mode on).
+Edit `.env` with your local settings. The `DATABASE_URL` must point to your local PostgreSQL instance. See `.env.example` for the expected format.
 
 ### Running the backend
 
@@ -242,10 +269,37 @@ To verify the bridge works:
 2. Visit `http://localhost:3000/nl/` — the page should show "Backend status" with "Status: ok".
 3. Or: `curl http://localhost:3000/api/health/` — should return `{"status": "ok"}`.
 
+## Redis (planned, not yet wired)
+
+Redis is part of the agreed architecture for background job processing (Celery task queue). It will be used for:
+
+- Payment webhook processing (enqueue webhook events for async worker processing)
+- Asynchronous email sending
+- Any long-running admin operations
+
+**Redis is not required to run the backend at the current stage.** No Celery tasks or Redis-dependent code exists yet.
+
+When Redis is needed (Phase 3 — Payments), you will need a local Redis server:
+
+**macOS (Homebrew):**
+
+```bash
+brew install redis
+brew services start redis
+```
+
+**Linux:**
+
+```bash
+sudo apt install redis-server
+sudo systemctl start redis
+```
+
+A `REDIS_URL` placeholder is included (commented out) in `backend/.env.example` for when it becomes needed.
+
 ## What is intentionally not done yet
 
-- PostgreSQL database wiring (SQLite used for bootstrap)
-- Redis / Celery setup
+- Redis / Celery wiring (documented above; will be implemented when needed)
 - Mollie payment integration
 - Product/catalog models
 - Django admin customization
