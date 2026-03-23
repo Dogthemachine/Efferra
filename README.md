@@ -209,19 +209,52 @@ Output is written to `frontend/.output/public/` and can be served by any static 
 
 ## Using the Makefile
 
-From the repository root:
+All developer workflow commands run from the repository root via `make`.
+
+### Primary targets
 
 ```bash
-make setup            # Install both backend and frontend dependencies
-make setup-backend    # Install backend dependencies only
-make setup-frontend   # Install frontend dependencies only
-make dev              # Print instructions for running dev servers
-make dev-backend      # Run Django dev server (localhost:8000)
-make dev-frontend     # Run Nuxt dev server (localhost:3000)
+make setup    # Install backend + frontend deps, create .env files from .env.example if missing
+make dev      # Print instructions for starting dev servers (see below)
+make test     # Sanity checks: backend test runner + frontend build validation
+make build    # Run Django system checks + generate static Nuxt site
+```
+
+### Dev servers
+
+`make dev` prints how to start both servers. They run in separate terminals:
+
+```bash
+# Terminal 1
+make dev-backend      # Django dev server on localhost:8000
+
+# Terminal 2
+make dev-frontend     # Nuxt dev server on localhost:3000
+```
+
+The frontend dev server proxies `/api/*` requests to the backend automatically.
+
+### Helper targets
+
+```bash
+make setup-backend    # Install backend dependencies only (Poetry)
+make setup-frontend   # Install frontend dependencies only (pnpm)
 make migrate          # Run Django database migrations
 make check            # Run Django system checks
-make build-frontend   # Generate static Nuxt site
+make build-frontend   # Generate static Nuxt site only
 ```
+
+### What `make test` actually does today
+
+`make test` is a **sanity/validation check**, not a behavioral test suite. No real tests exist yet.
+
+- **Backend** (`test-backend`): runs `python manage.py test` — the Django test runner executes, but finds 0 tests. The framework is wired and ready for real tests starting in Phase 1.
+- **Frontend** (`test-frontend`): runs `pnpm build` — a full Nuxt production build that validates TypeScript types and module resolution. No dedicated test runner (e.g., Vitest) is configured yet.
+
+### What the build target produces
+
+- **Backend**: runs `manage.py check` to validate Django configuration. No collectstatic or packaging step exists yet.
+- **Frontend**: runs `pnpm generate` to produce a static site in `frontend/.output/public/`.
 
 ## i18n setup
 
