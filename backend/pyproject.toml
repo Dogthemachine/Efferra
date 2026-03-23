@@ -1,8 +1,14 @@
-[tool.poetry]
+[project]
 name = "efferra-backend"
 version = "0.1.0"
 description = "Django backend for Efferra luxury candle webshop"
-authors = ["Efferra <dev@efferra.com>"]
+authors = [
+    {name = "Efferra", email = "dev@efferra.com"},
+]
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[tool.poetry]
 package-mode = false
 
 [tool.poetry.dependencies]

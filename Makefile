@@ -18,7 +18,8 @@ dev:
 	@echo "The frontend proxies /api/* requests to the backend automatically."
 	@echo ""
 
-## Run checks/tests for both backend and frontend.
+## Run backend test suite + frontend build validation.
+## Currently a sanity/compile check -- no behavioral tests exist yet.
 test: test-backend test-frontend
 
 ## Build artifacts for both backend and frontend.
@@ -34,7 +35,7 @@ setup-backend:
 dev-backend:
 	cd backend && poetry run python manage.py runserver
 
-## Run Django test suite.
+## Run Django test suite (currently 0 tests -- framework ready, no behavioral tests yet).
 test-backend:
 	cd backend && poetry run python manage.py test
 
@@ -56,7 +57,8 @@ setup-frontend:
 dev-frontend:
 	cd frontend && pnpm dev
 
-## Build Nuxt (includes TypeScript type-checking).
+## Nuxt production build — validates TypeScript and module resolution.
+## No dedicated test runner (e.g. Vitest) is configured yet.
 test-frontend:
 	cd frontend && pnpm build
 
@@ -68,5 +70,5 @@ build-frontend:
 
 ## Copy .env.example to .env for backend/frontend if .env does not exist yet.
 setup-env:
-	@if [ -f backend/.env ]; then echo "backend/.env already exists — skipping"; else cp backend/.env.example backend/.env && echo "Created backend/.env from .env.example"; fi
-	@if [ -f frontend/.env ]; then echo "frontend/.env already exists — skipping"; else cp frontend/.env.example frontend/.env && echo "Created frontend/.env from .env.example"; fi
+	@if [ -f backend/.env ]; then echo "backend/.env already exists -- skipping"; else cp backend/.env.example backend/.env && echo "Created backend/.env from .env.example"; fi
+	@if [ -f frontend/.env ]; then echo "frontend/.env already exists -- skipping"; else cp frontend/.env.example frontend/.env && echo "Created frontend/.env from .env.example"; fi

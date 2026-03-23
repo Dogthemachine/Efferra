@@ -216,7 +216,7 @@ All developer workflow commands run from the repository root via `make`.
 ```bash
 make setup    # Install backend + frontend deps, create .env files from .env.example if missing
 make dev      # Print instructions for starting dev servers (see below)
-make test     # Run backend test suite + frontend build (type-check)
+make test     # Sanity checks: backend test runner + frontend build validation
 make build    # Run Django system checks + generate static Nuxt site
 ```
 
@@ -244,10 +244,12 @@ make check            # Run Django system checks
 make build-frontend   # Generate static Nuxt site only
 ```
 
-### What the test targets actually run
+### What `make test` actually does today
 
-- **Backend** (`test-backend`): `python manage.py test` — runs the Django test suite. Currently no custom tests exist (0 tests), but the framework is wired and ready.
-- **Frontend** (`test-frontend`): `pnpm build` — runs a full Nuxt production build, which includes TypeScript type-checking. No dedicated test framework (e.g., Vitest) is configured yet.
+`make test` is a **sanity/validation check**, not a behavioral test suite. No real tests exist yet.
+
+- **Backend** (`test-backend`): runs `python manage.py test` — the Django test runner executes, but finds 0 tests. The framework is wired and ready for real tests starting in Phase 1.
+- **Frontend** (`test-frontend`): runs `pnpm build` — a full Nuxt production build that validates TypeScript types and module resolution. No dedicated test runner (e.g., Vitest) is configured yet.
 
 ### What the build target produces
 
