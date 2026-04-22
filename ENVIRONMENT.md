@@ -48,7 +48,7 @@ Configuration and secrets
     * backend env file (Django)
     * frontend env file (Nuxt)
 Rules:
-* Do not commit env and md files to git.
+* Do not commit .env files to git.
 * Do not print secrets to logs.
 Note:
 * Exact environment variable names and full config lists are intentionally left for implementation.
