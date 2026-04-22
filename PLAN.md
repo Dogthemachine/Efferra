@@ -35,7 +35,7 @@
 - PDF invoices emailed per purchase
 - Django admin fully customized for shop operations
 
-**Repo state:** Zero code. Only `.gitignore` and local-only doc files exist.
+**Repo state:** Phase 0 complete (scaffold, dev environment, API bridge). Phase 1 catalog domain models implemented. Phase 2 cart and order domain models implemented. API endpoints, payments, and frontend pages not yet built.
 
 ---
 

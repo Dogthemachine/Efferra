@@ -4,18 +4,21 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 
 ## Current status
 
-**Phase 0 — Backend bootstrap + Frontend bootstrap + API bridge complete.**
+**Phase 0 complete. Phase 1 catalog domain and Phase 2 cart/order domain models implemented.**
 
 - Django backend initialized in `backend/`.
 - Nuxt frontend initialized in `frontend/` with i18n skeleton (4 locales).
 - Frontend-to-backend API bridge established via Nuxt dev proxy.
+- Catalog domain models in place: `Collection`, `Product`, `ProductVariant`, `ProductImage`.
+- Cart domain models in place: `Cart`, `CartItem` (session-based, token-identified).
+- Order domain models in place: `Order`, `OrderItem` (guest checkout, full purchase snapshot).
 - No production deployment configuration exists yet.
 
 ## Stack
 
 | Layer    | Technology           | Status      |
 |----------|----------------------|-------------|
-| Backend  | Django 5.2 / Python  | Initialized |
+| Backend  | Django 5.2 / Python  | Domain models active (catalog, cart, orders) |
 | Frontend | Nuxt 3.x / pnpm     | Initialized |
 | Database | PostgreSQL           | Configured for local dev  |
 | Payments | Mollie               | Not started |
@@ -27,6 +30,9 @@ Efferra/
 ├── backend/                # Django backend (Poetry-managed)
 │   ├── config/             # Django project settings, URLs, WSGI/ASGI
 │   ├── core/               # Bootstrap app (health endpoint)
+│   ├── catalog/            # Catalog domain: Collection, Product, ProductVariant, ProductImage
+│   ├── cart/               # Cart domain: Cart, CartItem (session-based, token-identified)
+│   ├── orders/             # Order domain: Order, OrderItem (guest checkout, purchase snapshot)
 │   ├── manage.py
 │   ├── pyproject.toml      # Python dependencies (Poetry)
 │   ├── poetry.lock         # Locked dependency versions
@@ -246,9 +252,7 @@ make build-frontend   # Generate static Nuxt site only
 
 ### What `make test` actually does today
 
-`make test` is a **sanity/validation check**, not a behavioral test suite. No real tests exist yet.
-
-- **Backend** (`test-backend`): runs `python manage.py test` — the Django test runner executes, but finds 0 tests. The framework is wired and ready for real tests starting in Phase 1.
+- **Backend** (`test-backend`): runs `python manage.py test` — the Django test runner discovers and executes all tests. Tests exist for `cart` and `orders` domain models (18 tests). The `catalog` app has tests stubs ready but no written tests yet.
 - **Frontend** (`test-frontend`): runs `pnpm build` — a full Nuxt production build that validates TypeScript types and module resolution. No dedicated test runner (e.g., Vitest) is configured yet.
 
 ### What the build target produces
@@ -325,12 +329,14 @@ A `REDIS_URL` placeholder is included (commented out) in `backend/.env.example` 
 
 ## What is intentionally not done yet
 
+- REST API endpoints for catalog, cart, and orders
 - Redis / Celery wiring (documented above; will be implemented when needed)
 - Mollie payment integration
-- Product/catalog models
-- Django admin customization
+- Django admin customization beyond basic model registration
+- Shipping fee engine
+- Promotions engine (promo codes, gift cards, bundles)
 - User authentication / social login
 - Production deployment configuration
 - Docker / containerization
-- Full i18n content translation
+- Full i18n content translation for product content
 - Analytics / GDPR compliance tools
