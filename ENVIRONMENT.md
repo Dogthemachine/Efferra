@@ -1,59 +1,94 @@
-ENVIRONMENT.md — Deployment/Runtime Environment Contract (VM)
+# ENVIRONMENT.md — Deployment & Runtime Environment
 
-High-level architecture 
-* Reverse proxy: Nginx
-* Backend app server: Gunicorn (Django)
-* Frontend: Nuxt built as static output (served as static files; no Node SSR server for now, pre-render as static HTML)
-* Database: PostgreSQL on the same VM
-* Background jobs: Celery + Redis (Redis on the same VM)
-* Backend/Frontend separation: API-first (Nuxt calls Django API)
-* Hosting model: single VM.
+## Overview
 
-Domains and routing (recommended default)
-* www.<domain> → Nuxt static site
-* api.<domain> → Django API
-* api.<domain>/admin/ → Django admin (staff only)
-Nginx routes:
-* www serves Nuxt static assets
-* api proxies to Gunicorn
-* /static/ and /media/ served directly by Nginx (no Django for static/media)
+Single-VM deployment. No managed cloud services unless explicitly added later.
 
-Services on the VM 
-Run as system services (e.g., systemd):
-* nginx
-* postgresql
-* redis
-* webshop-backend (Gunicorn)
-* webshop-worker (Celery worker)
-* webshop-beat (Celery beat, if scheduled jobs are needed)
-Nuxt does not run as a service in production (static build served by Nginx).
+| Component | Technology | Notes |
+|---|---|---|
+| Reverse proxy | Nginx | Routes www and api subdomains |
+| Backend app server | Gunicorn (Django) | API + admin |
+| Frontend | Nuxt static build | Pre-rendered HTML/CSS/JS, served by Nginx |
+| Database | PostgreSQL | On the same VM |
+| Background jobs | Celery + Redis | Both on the same VM |
 
+API-first split: Nuxt calls Django API. Nuxt never accesses the database directly.
 
-Static + media handling 
-* Django static is collected to /static/
-* Media uploads stored in /media/
-* Nginx serves both directly:
-    * /static/ → shared static directory
-    * /media/ → shared media directory
+---
 
-Background jobs 
-* Use Celery + Redis for asynchronous processing.
-* Typical tasks include:
-    * payment webhook processing pipeline (validate → enqueue → worker applies state)
-    * email sending (if implemented asynchronously)
-    * any long-running admin operations
+## Domain routing
 
-Configuration and secrets 
-* Use separate environment files per app (paths are conventional; exact names can vary):
-    * backend env file (Django)
-    * frontend env file (Nuxt)
-Rules:
-* Do not commit .env files to git.
-* Do not print secrets to logs.
-Note:
-* Exact environment variable names and full config lists are intentionally left for implementation.
+| Host | Destination |
+|---|---|
+| `www.<domain>` | Nuxt static site (served by Nginx) |
+| `api.<domain>` | Django API (proxied to Gunicorn) |
+| `api.<domain>/admin/` | Django admin (staff only) |
 
-Local development (expected shape)
-* Django runs locally (e.g., localhost:8000)
-* Nuxt dev server runs locally (e.g., localhost:3000)
-* Postgres + Redis run locally (native or via Docker)
+Nginx serves `/static/` and `/media/` directly — Django is not involved in static/media serving in production.
+
+---
+
+## Services (run as systemd units)
+
+| Service | Unit name | Notes |
+|---|---|---|
+| Nginx | `nginx` | |
+| PostgreSQL | `postgresql` | |
+| Redis | `redis` | |
+| Django API | `webshop-backend` | Gunicorn process |
+| Celery worker | `webshop-worker` | Processes async jobs (webhook processing, emails) |
+| Celery beat | `webshop-beat` | Scheduled jobs, if needed |
+
+Nuxt does **not** run as a service. It is a static build served directly by Nginx.
+
+---
+
+## Static and media files
+
+- Django static files are collected to `/static/` via `manage.py collectstatic`.
+- Media uploads (product images) stored in `/media/`.
+- Nginx serves both directly; Django is bypassed for these paths in production.
+
+---
+
+## Background jobs (Celery)
+
+Celery + Redis are required for:
+
+- Payment webhook processing pipeline (validate → dedup → enqueue → worker applies state)
+- Transactional email dispatch (order confirmation, shipping updates, refund notices)
+- Any long-running admin operations
+
+**Redis is not required for local development at the current stage.** No Celery tasks exist yet. Redis becomes required when Phase 3 (payments) is implemented.
+
+---
+
+## Configuration and secrets
+
+- Backend: `backend/.env` (not committed — `backend/.env.example` is the template)
+- Frontend: `frontend/.env` (not committed — `frontend/.env.example` is the template)
+- Never commit `.env` files to git.
+- Never print secrets to logs.
+- Full variable lists are in the respective `.env.example` files.
+
+Key backend variables:
+- `SECRET_KEY` — Django secret key
+- `DEBUG` — set to `False` in production
+- `ALLOWED_HOSTS` — production domain(s)
+- `DATABASE_URL` — PostgreSQL connection string
+- `REDIS_URL` — Redis connection string (required from Phase 3 onward)
+- `MOLLIE_API_KEY`, `MOLLIE_WEBHOOK_SECRET`, `PUBLIC_BASE_URL` — payment integration (Phase 3)
+
+---
+
+## Local development
+
+| Service | Default URL |
+|---|---|
+| Django backend | `http://localhost:8000` |
+| Nuxt frontend | `http://localhost:3000` |
+
+- PostgreSQL and Redis run locally (native install or Docker — implementation choice).
+- Nuxt dev server proxies `/api/*` to the Django backend via Nitro `devProxy`.
+- Use `make dev-backend` and `make dev-frontend` in separate terminals.
+- `make setup` installs all dependencies and creates `.env` files from `.env.example`.

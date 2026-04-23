@@ -35,7 +35,7 @@
 - PDF invoices emailed per purchase
 - Django admin fully customized for shop operations
 
-**Repo state:** Phase 0 complete (scaffold, dev environment, API bridge). Phase 1 catalog domain models implemented. Phase 2 cart and order domain models implemented. API endpoints, payments, and frontend pages not yet built.
+**Repo state:** Phase 0 complete. Phase 1 domain models complete (catalog). Phase 2 domain models complete (cart, orders). **Remaining before Phase 3:** REST API endpoints for catalog/cart/orders, Django admin customization, Nuxt catalog/product pages, shipping fee engine. Phase 3 (payments) not started.
 
 ---
 
@@ -271,39 +271,49 @@
 
 ---
 
-## Section D: Kanban-Ready Task List (Next 20 Cards)
+## Section D: Implementation Status & Next Cards
 
-These cover **Phase 0 + Phase 1** — the immediate work to start implementation.
+### Completed work
 
-### Phase 0 — Scaffolding
+| Phase | Area | Status |
+|---|---|---|
+| Phase 0 | Scaffolding, dev environment, API bridge | ✅ Done |
+| Phase 1 | Catalog domain models (Collection, Product, ProductVariant, ProductImage) | ✅ Done |
+| Phase 2 | Cart domain models (Cart, CartItem) | ✅ Done |
+| Phase 2 | Order domain models (Order, OrderItem with full snapshot) | ✅ Done |
+
+### Remaining before Phase 3 (next priority cards)
+
+These complete the Phase 1+2 deliverables that are still open. They must be done before Mollie can be tested end-to-end.
 
 | # | Card Title | Tags |
 |---|---|---|
-| 1 | Init Django project with Poetry + pyproject.toml | `scaffolding`, `backend` |
-| 2 | Create initial Django apps: core, catalog | `scaffolding`, `backend` |
-| 3 | Configure Django settings (PostgreSQL, Redis, env-based config) | `scaffolding`, `backend`, `config` |
-| 4 | Add health-check endpoint GET /api/health/ | `scaffolding`, `backend`, `api` |
-| 5 | Init Nuxt project with pnpm | `scaffolding`, `frontend` |
-| 6 | Configure Nuxt i18n with 4 locale stubs (NL/EN/DE/FR) | `scaffolding`, `frontend`, `i18n` |
-| 7 | Set up Nuxt dev proxy to Django API | `scaffolding`, `frontend`, `config` |
-| 8 | Create root Makefile (setup, dev, test, build) | `scaffolding`, `dx` |
-| 9 | Add .env.example for backend and frontend | `scaffolding`, `config` |
-| 10 | Verify end-to-end: Nuxt fetches /api/health/ | `scaffolding`, `verification` |
+| 1 | Customize Django admin for catalog: Collection, Product, Variant, ProductImage | `catalog`, `backend`, `admin` |
+| 2 | Build catalog REST API: collection list, product list, product detail | `catalog`, `backend`, `api` |
+| 3 | Build cart REST API: create cart, add/update/remove items | `cart`, `backend`, `api` |
+| 4 | Build order creation API: POST /api/orders/ from cart + address fields | `orders`, `backend`, `api` |
+| 5 | Shipping fee engine: flat-fee matrix (NL / EU), zone resolution | `shipping`, `backend` |
+| 6 | Add DRF (Django REST Framework) or equivalent to backend dependencies | `backend`, `deps` |
+| 7 | Create Nuxt catalog listing page (consumes catalog API) | `catalog`, `frontend`, `pages` |
+| 8 | Create Nuxt product detail page with image gallery | `catalog`, `frontend`, `pages` |
+| 9 | Create Nuxt cart page/drawer | `cart`, `frontend`, `pages` |
+| 10 | Create Nuxt checkout page (address form, shipping cost, order summary) | `checkout`, `frontend`, `pages` |
+| 11 | Write catalog model + API tests | `catalog`, `backend`, `testing` |
+| 12 | Add i18n support for product content fields (translated descriptions) | `catalog`, `backend`, `i18n` |
 
-### Phase 1 — Catalog & Admin
+### Phase 3 — Payments (Mollie) cards
+
+See `PAYMENTS.md` for the authoritative contract. Cards below are derived from it.
 
 | # | Card Title | Tags |
 |---|---|---|
-| 11 | Design catalog models (Product, ProductFamily, Variant, ProductImage) | `catalog`, `backend`, `models` |
-| 12 | Add i18n support for product content fields | `catalog`, `backend`, `i18n` |
-| 13 | Customize Django admin for catalog CRUD + image upload | `catalog`, `backend`, `admin` |
-| 14 | Build catalog API: product list + detail endpoints | `catalog`, `backend`, `api` |
-| 15 | Build product family API endpoint | `catalog`, `backend`, `api` |
-| 16 | Create Nuxt catalog listing page | `catalog`, `frontend`, `pages` |
-| 17 | Create Nuxt product detail page with image gallery | `catalog`, `frontend`, `pages` |
-| 18 | Implement i18n routing (/nl/, /en/, /de/, /fr/) | `frontend`, `i18n`, `routing` |
-| 19 | Configure media upload + serving in dev | `catalog`, `backend`, `media` |
-| 20 | Write tests for catalog models + API serialization | `catalog`, `backend`, `testing` |
+| 13 | Create `payments` Django app with Payment, Refund, WebhookEvent models | `payments`, `backend`, `models` |
+| 14 | Implement POST /api/orders/{id}/pay/ — creates Mollie payment, returns checkout_url | `payments`, `backend`, `api` |
+| 15 | Implement POST /api/payments/mollie/webhook/ — verify, dedup, enqueue | `payments`, `backend`, `api` |
+| 16 | Wire Celery + Redis; implement webhook worker job | `payments`, `backend`, `celery` |
+| 17 | Implement POST /api/admin/orders/{id}/refund/ — staff-only, idempotent | `payments`, `backend`, `api` |
+| 18 | Nuxt: redirect to Mollie hosted checkout, return/confirmation page | `payments`, `frontend`, `pages` |
+| 19 | Write tests for all PAYMENTS.md verification scenarios | `payments`, `backend`, `testing` |
 
 ---
 

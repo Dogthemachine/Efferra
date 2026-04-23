@@ -54,9 +54,10 @@ Efferra/
 │   └── .env.example        # Environment variable template
 ├── .claude/skills/         # Project-level Claude Code skills
 ├── CLAUDE.md               # Project contract and constraints
+├── DOMAIN.md               # Domain model reference and decision log
 ├── ENVIRONMENT.md          # Deployment environment specification
 ├── PAYMENTS.md             # Payment integration specification
-├── PLAN.md                 # Development plan
+├── PLAN.md                 # Development plan with phase status
 ├── Makefile                # Repository-level commands
 └── README.md               # This file
 ```
@@ -327,16 +328,77 @@ sudo systemctl start redis
 
 A `REDIS_URL` placeholder is included (commented out) in `backend/.env.example` for when it becomes needed.
 
+## Domain model summary
+
+See `DOMAIN.md` for the full domain model reference with field-level detail and decision rationale.
+
+### Catalog hierarchy
+
+```
+Collection         — artistic grouping (e.g. Forest, Faces)
+  └── Product      — one candle shape/design family; NOT the sellable unit
+        └── ProductVariant  — the sellable unit (material × color × finish)
+              └── ProductImage  — image tied to product or to a specific variant
+```
+
+- **Price** and **stock** live on `ProductVariant`, not on `Product`.
+- `Product.display_price` is a derived property: minimum price across active variants, used for "from €X" cards.
+- Variants use explicit fields (material, color, finish, is_hand_painted) — no generic attribute engine.
+- Limited edition can be flagged at product level, variant level, or both independently.
+
+### Cart model
+
+```
+Cart (UUID token)
+  └── CartItem → ProductVariant (live pointer, no price snapshot here)
+```
+
+- Cart is anonymous and session-based. No user account required.
+- Price snapshot happens at order creation, not in the cart.
+- `Cart.shipping_country` captures early country selection for shipping cost preview.
+
+### Order model
+
+```
+Order
+  ├── guest customer fields (email, name, phone)
+  ├── shipping address snapshot (embedded fields)
+  ├── billing address snapshot (or billing_same_as_shipping flag)
+  ├── frozen totals (subtotal, shipping_total, grand_total)
+  ├── status (pending → pending_payment → paid → fulfilled / cancelled / refunded)
+  └── OrderItem (one per line — full purchase snapshot, authoritative record)
+```
+
+- `OrderItem` stores full snapshot of product name, SKU, material, color, finish, unit price, quantity, line total.
+- Nullable FK references (`product_ref`, `variant_ref`) exist for traceability but are not authoritative.
+- Totals are frozen at order creation time and never recalculated from live catalog.
+
+---
+
 ## What is intentionally not done yet
 
-- REST API endpoints for catalog, cart, and orders
-- Redis / Celery wiring (documented above; will be implemented when needed)
-- Mollie payment integration
-- Django admin customization beyond basic model registration
-- Shipping fee engine
-- Promotions engine (promo codes, gift cards, bundles)
-- User authentication / social login
-- Production deployment configuration
-- Docker / containerization
-- Full i18n content translation for product content
-- Analytics / GDPR compliance tools
+- REST API endpoints for catalog, cart, and orders (Phase 1 remaining / Phase 2)
+- Django admin customization beyond basic model registration (Phase 1 remaining)
+- Nuxt catalog and product pages (Phase 1 remaining)
+- i18n product content (translations not yet implemented)
+- Shipping fee engine (Phase 2)
+- Mollie payment integration (Phase 3)
+- Redis / Celery wiring — required for Phase 3, documented above
+- Promotions engine (promo codes, gift cards, bundles) — Phase 4
+- Invoicing, transactional emails, return flow — Phase 5
+- User authentication / social login — Phase 6
+- GDPR compliance, analytics — Phase 7
+- Production deployment configuration — Phase 8
+- Docker / containerization (not planned; VM deployment only)
+
+## Recommended next steps
+
+The domain models for catalog, cart, and orders are in place. The natural next work is:
+
+1. **REST API layer** — DRF serializers and views for catalog (product list/detail), cart (add/update/remove), and order creation. This unblocks frontend development.
+2. **Django admin customization** — basic admin for catalog CRUD, variant/image management (required before content can be entered).
+3. **Nuxt catalog and product pages** — frontend pages consuming the catalog API.
+4. **Shipping fee engine** — flat-fee matrix (NL / EU) used at checkout/order-creation time.
+5. **Mollie payment integration** — full Phase 3 as specified in `PAYMENTS.md`.
+
+See `PLAN.md` for phase sequencing rationale and `DOMAIN.md` for domain model decisions.
