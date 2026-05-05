@@ -3,8 +3,11 @@
 This file documents the implemented domain models, their key fields, and the decisions behind them.
 It is intended as a stable reference for agents and developers working on this codebase.
 
-**Current status:** Catalog, Cart, and Order domain models are implemented and migrated.
-API endpoints, admin customization, and frontend pages are not yet built.
+**Current status:** Catalog, Cart, Order, and the MVP **Payments contract layer**
+(Payment, Refund, WebhookEvent + Order reservation/transition helpers) are
+implemented and migrated. HTTP endpoints, admin customization beyond default
+registration, frontend pages, and the real Mollie integration are not yet
+built.
 
 ---
 
@@ -131,14 +134,36 @@ The central business record created from a Cart at checkout.
 
 | Value | Meaning |
 |---|---|
-| `pending` | Default; order created, not yet submitted for payment |
-| `pending_payment` | Payment session created; awaiting webhook confirmation |
-| `paid` | Confirmed via Mollie webhook |
+| `pending` | Default; order created with stock reserved; no payment session opened yet |
+| `pending_payment` | Payment session opened; awaiting webhook confirmation |
+| `paid` | Confirmed via Mollie webhook; sale committed |
 | `fulfilled` | Shipped / dispatched |
-| `cancelled` | Cancelled |
-| `refunded` | Refunded (full) |
+| `payment_failed` | Last payment attempt terminally failed; reserved stock has been released |
+| `expired` | Reservation deadline passed before any successful payment; reserved stock released |
+| `cancelled` | Customer or admin cancelled before payment; reserved stock released |
+| `refunded` | Full refund completed (admin-triggered, MVP) |
 
-Note: `partially_refunded` is defined in PAYMENTS.md but is not yet a status value in the Order model. This will need to be added in Phase 3.
+Partial refunds are out of scope for the MVP. `partially_refunded` is intentionally
+not a status value; full refunds only.
+
+#### Stock reservation lifecycle
+
+- Stock is reserved at order creation by decrementing `ProductVariant.stock`
+  by each `OrderItem.quantity`. The order itself is the reservation record.
+- `Order.reservation_expires_at` is set 30 minutes after creation
+  (`Order.RESERVATION_TIMEOUT`).
+- Helper methods on `Order`:
+  - `Order.compute_reservation_expiry()` — returns `now + RESERVATION_TIMEOUT`.
+  - `Order.has_active_reservation` — true while pre-paid and not yet expired.
+  - `Order.is_reservation_expired` — true once the deadline has passed.
+  - `Order.release_stock_reservation()` — restores reserved stock; idempotent.
+  - `Order.mark_pending_payment()` / `mark_paid()` / `mark_payment_failed()` /
+    `mark_cancelled()` / `mark_expired()` / `mark_fulfilled()` /
+    `mark_refunded()` — idempotent state transitions. The terminal
+    pre-paid transitions (`payment_failed`, `cancelled`, `expired`)
+    release reserved stock automatically; `mark_paid` clears the
+    reservation timer without changing stock (sale committed).
+  - `Order.active_payment()` — returns the current non-terminal payment, or `None`.
 
 #### Key fields
 
@@ -152,6 +177,7 @@ Note: `partially_refunded` is defined in PAYMENTS.md but is not yet a status val
 | Frozen totals | `subtotal`, `shipping_total`, `grand_total` (DecimalField) |
 | Currency | `currency` (default EUR) |
 | Status | `status` (TextChoices, default `pending`) |
+| Reservation | `reservation_expires_at` (DateTimeField, nullable; set at creation, cleared on terminal state) |
 | Notes | `customer_note` (optional) |
 | Timestamps | `placed_at` (auto_now_add), `updated_at` (auto_now) |
 
@@ -180,6 +206,124 @@ One purchased line. A historical snapshot record, not a live catalog pointer.
 
 ---
 
+## Payments domain (`backend/payments/models.py`)
+
+The payments app implements the MVP payment-flow contract: state machines
+for `Payment` and `Refund`, plus a `WebhookEvent` row for inbound webhook
+deduplication. PSP integration (Mollie API calls, HTTP endpoints, Celery
+worker) is wired in a later card; this app currently provides the
+domain/contract layer only.
+
+```
+Order ─┬─< Payment   (one row per payment attempt; UUID pk)
+       └─< Refund    (one row per admin-triggered refund; UUID pk; FK to Payment)
+
+WebhookEvent (provider, provider_event_key uniquely; UUID pk)
+```
+
+### Payment
+
+One payment attempt against a single Order. An Order may have multiple
+Payment rows over its lifetime, but at most one is allowed to be in a
+non-terminal status at any time.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUIDField (pk) | |
+| `order` | FK → Order | PROTECT |
+| `provider` | CharField(32) | default `mollie` |
+| `provider_payment_id` | CharField(128) | blank initially; set after PSP call. Unique per provider when set. |
+| `checkout_url` | URLField | UX only; never used as truth |
+| `amount_cents` | PositiveIntegerField | EUR for MVP |
+| `currency` | CharField(3) | default `EUR` |
+| `status` | TextChoices | `created` / `pending` / `paid` / `failed` / `cancelled` / `expired` / `refunded` |
+| `idempotency_key` | CharField(64) | passed to PSP create-payment so retries do not duplicate |
+| `raw_provider_payload_last` | JSONField | last raw provider payload, for audit/debug |
+| `created_at`, `updated_at` | DateTimeField | auto |
+
+**Active vs terminal:** `Payment.ACTIVE_STATUSES = {created, pending}`.
+Everything else is terminal.
+
+**Helper methods:**
+- `Payment.get_or_create_active(order)` — returns the current payable
+  payment for an order, creating one if none exists. Honors the
+  "one active payment per order" rule.
+- `mark_pending(provider_payment_id, checkout_url)` — open the PSP session.
+- `mark_paid()` / `mark_failed()` / `mark_cancelled()` / `mark_expired()` /
+  `mark_refunded()` — idempotent transitions; raise `InvalidPaymentTransition`
+  on illegal moves.
+
+### Refund
+
+Admin-triggered full refund. **MVP scope: full refunds only.**
+`amount_cents` must equal the parent order's `grand_total` (in cents).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUIDField (pk) | |
+| `order` | FK → Order | PROTECT |
+| `payment` | FK → Payment | PROTECT |
+| `provider_refund_id` | CharField(128) | blank initially. Unique per payment when set. |
+| `amount_cents` | PositiveIntegerField | must equal order grand_total in cents (full refund) |
+| `currency` | CharField(3) | default `EUR` |
+| `status` | TextChoices | `requested` / `processing` / `succeeded` / `failed` / `cancelled` |
+| `idempotency_key` | CharField(64) | passed to PSP refund call |
+| `created_by` | FK → auth.User | SET_NULL; staff user who triggered |
+| `raw_provider_payload_last` | JSONField | last raw provider payload |
+| `created_at`, `updated_at` | DateTimeField | auto |
+
+**Helper methods:**
+- `Refund.request_full_refund(order, created_by=...)` — preconditions
+  enforced: order must be `paid`, must have a `paid` Payment, must not
+  already have an active refund in flight.
+- `mark_processing(provider_refund_id)` / `mark_failed()` / `mark_cancelled()` —
+  status-only transitions.
+- `mark_succeeded()` — atomic terminal success; also flips Payment to
+  `refunded` and Order to `refunded`.
+
+### WebhookEvent
+
+Durable record of one inbound provider webhook delivery, used for
+deduplication and audit. The HTTP webhook handler must call
+`WebhookEvent.record_delivery(...)` first; if `created=False`, the
+delivery is a duplicate and must not produce side effects again.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUIDField (pk) | |
+| `provider` | CharField(32) | default `mollie` |
+| `provider_event_key` | CharField(255) | unique together with provider; for Mollie this is typically the provider payment id |
+| `payload` | JSONField | raw inbound payload |
+| `received_at` | DateTimeField | auto_now_add |
+| `processed_at` | DateTimeField | nullable; set when worker finishes |
+| `processing_status` | TextChoices | `pending` / `success` / `failed` |
+| `processing_error` | TextField | populated when processing failed |
+
+**Constraint:** unique `(provider, provider_event_key)` — guarantees
+deduplication.
+
+**Helper methods:**
+- `WebhookEvent.record_delivery(provider, provider_event_key, payload)`
+  — `(event, created)` tuple; idempotent.
+- `mark_processed_success()` / `mark_processed_failed(error)`.
+
+### MVP payment-flow rules (enforced in code)
+
+- **Webhook is the source of truth.** `Order.mark_paid` and
+  `Payment.mark_paid` are intended to be triggered only by confirmed-paid
+  signal (typically a webhook). The frontend never marks an order paid.
+- **Reservation timeout is 30 minutes** (`Order.RESERVATION_TIMEOUT`).
+- **One active payment per order** at a time
+  (`Payment.get_or_create_active`).
+- **Idempotency:** every transition helper is a no-op when already in
+  the target state; `WebhookEvent.record_delivery` deduplicates by
+  `provider_event_key`; `Payment` and `Refund` carry `idempotency_key`
+  for outbound PSP calls.
+- **Full refunds only** for MVP. `Refund.request_full_refund` rejects
+  any operation that would create or imply a partial refund.
+
+---
+
 ## Decision log
 
 Key decisions made during domain modeling. Preserved here so future agents/developers understand the rationale.
@@ -199,4 +343,8 @@ Key decisions made during domain modeling. Preserved here so future agents/devel
 | OrderItem snapshot pattern | All purchase data (name, SKU, material, color, price, quantity, line_total) is stored on OrderItem | Same reason as frozen totals — the record must survive catalog changes. Nullable FKs exist for traceability but the snapshot fields are authoritative. |
 | Guest-first checkout | No user account required to place an order | Mandatory per CLAUDE.md. Accounts are optional/additive. |
 | Order.reference as UUID | Public-facing order identifier in API URLs is a UUID, not sequential PK | Avoids leaking order volume and prevents enumeration attacks. `order_number` (e.g. EFF-20240001) is the human-readable identifier for customer communication. |
-| Status `partially_refunded` missing from Order.Status | Not yet added to the Order model | An oversight to address in Phase 3 alongside the full payments implementation. PAYMENTS.md specifies it as a required state. |
+| Full refunds only for MVP | `Refund.request_full_refund` enforces `amount_cents == order.grand_total`; no `partially_refunded` status on Order | The shop is low-traffic luxury with rare returns and per-order admin inspection. Partial refund logic adds substantial complexity (line-level accounting, multiple Refund rows per order, separate webhook flows) that is not justified at MVP scale. Partial refunds are explicitly deferred. |
+| Order is the reservation record | Stock decrements at order creation; `Order.reservation_expires_at` carries the 30-minute deadline; OrderItem quantities drive release | A separate Reservation table would add a join and an extra lifecycle to keep in sync with Order for no MVP benefit. The order already has the items and quantities; making it the reservation record keeps the model graph minimal. |
+| Separate Order and Payment status fields | Order tracks the business state; Payment tracks the per-attempt PSP state. They are not unified into one shared field. | The card spec explicitly allows distinct status fields when it keeps the implementation cleaner. Order outlives any single payment attempt (multiple retries are common); Payment carries provider-specific terminal states (`expired`, etc.) that have no direct business meaning on the Order. |
+| Webhook-first truth, frontend never marks paid | `Order.mark_paid`/`Payment.mark_paid` are intended to fire only from webhook processing; the redirect/return URL is UX-only | Mandatory per CLAUDE.md and PAYMENTS.md. Trusting the redirect makes the system race-prone and trivially spoofable. |
+| Idempotency built into transitions | All `mark_*` helpers are no-ops when already in the target state; `WebhookEvent` deduplicates deliveries by `provider_event_key` | Webhooks are retried by providers and may arrive out of order; double-clicks happen in admin UIs. Idempotent transitions and dedup are cheaper than recovery-from-corruption. |

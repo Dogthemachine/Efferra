@@ -35,7 +35,7 @@
 - PDF invoices emailed per purchase
 - Django admin fully customized for shop operations
 
-**Repo state:** Phase 0 complete. Phase 1 domain models complete (catalog). Phase 2 domain models complete (cart, orders). **Remaining before Phase 3:** REST API endpoints for catalog/cart/orders, Django admin customization, Nuxt catalog/product pages, shipping fee engine. Phase 3 (payments) not started.
+**Repo state:** Phase 0 complete. Phase 1 domain models complete (catalog). Phase 2 domain models complete (cart, orders). **Phase 3 contract layer complete** — `payments` Django app with `Payment`, `Refund`, `WebhookEvent` models, plus the reservation lifecycle and idempotent state-transition helpers on `Order`. **Remaining before Phase 3 launch:** REST API endpoints for catalog/cart/orders, Django admin customization, Nuxt catalog/product pages, shipping fee engine, and the Phase 3 HTTP wiring (DRF endpoints, Celery worker, real Mollie API client).
 
 ---
 
@@ -49,7 +49,7 @@
 | **`catalog`** | Products, families, variants (material × color), media, limited editions, i18n content |
 | **`cart`** | Session-based cart (multi-item), cart ↔ stock validation |
 | **`orders`** | Order creation (guest + logged-in), order state machine, order history |
-| **`payments`** | Mollie integration: Payment/Refund/WebhookEvent models, create-payment, webhook handler, worker jobs (as specified in PAYMENTS.md) |
+| **`payments`** | Mollie integration: Payment/Refund/WebhookEvent models (✅ implemented), create-payment endpoint, webhook handler, worker jobs (pending — see PAYMENTS.md) |
 | **`promotions`** | Promo codes, discounts, gift cards (digital, expiration), bundles ("choose 3 pay 2"), free-shipping threshold |
 | **`shipping`** | Flat-fee price matrix (NL/EU zones), carrier metadata, return-label generation |
 | **`accounts`** | Optional social login (Google/Facebook), minimal profile, session management |
@@ -281,6 +281,7 @@
 | Phase 1 | Catalog domain models (Collection, Product, ProductVariant, ProductImage) | ✅ Done |
 | Phase 2 | Cart domain models (Cart, CartItem) | ✅ Done |
 | Phase 2 | Order domain models (Order, OrderItem with full snapshot) | ✅ Done |
+| Phase 3 | MVP payment-flow contract layer: `payments` app (Payment, Refund, WebhookEvent), Order reservation lifecycle (`reservation_expires_at`, 30-min timeout), idempotent `mark_*` transition helpers, full-refund-only `Refund.request_full_refund` | ✅ Done |
 
 ### Remaining before Phase 3 (next priority cards)
 
@@ -305,15 +306,17 @@ These complete the Phase 1+2 deliverables that are still open. They must be done
 
 See `PAYMENTS.md` for the authoritative contract. Cards below are derived from it.
 
-| # | Card Title | Tags |
-|---|---|---|
-| 13 | Create `payments` Django app with Payment, Refund, WebhookEvent models | `payments`, `backend`, `models` |
-| 14 | Implement POST /api/orders/{id}/pay/ — creates Mollie payment, returns checkout_url | `payments`, `backend`, `api` |
-| 15 | Implement POST /api/payments/mollie/webhook/ — verify, dedup, enqueue | `payments`, `backend`, `api` |
-| 16 | Wire Celery + Redis; implement webhook worker job | `payments`, `backend`, `celery` |
-| 17 | Implement POST /api/admin/orders/{id}/refund/ — staff-only, idempotent | `payments`, `backend`, `api` |
-| 18 | Nuxt: redirect to Mollie hosted checkout, return/confirmation page | `payments`, `frontend`, `pages` |
-| 19 | Write tests for all PAYMENTS.md verification scenarios | `payments`, `backend`, `testing` |
+| # | Card Title | Tags | Status |
+|---|---|---|---|
+| 13 | Create `payments` Django app with Payment, Refund, WebhookEvent models + Order reservation/transition helpers | `payments`, `backend`, `models` | ✅ Done (this card) |
+| 14 | Implement POST /api/checkout/submit — validate cart, reserve stock, create/reuse Order + Payment, return checkout_url | `payments`, `backend`, `api` | Pending |
+| 15 | Implement GET /api/orders/{token}/status — server-truth status read for frontend | `payments`, `backend`, `api` | Pending |
+| 16 | Implement POST /api/orders/{token}/retry-payment — new payment when previous attempt is terminal | `payments`, `backend`, `api` | Pending |
+| 17 | Implement POST /api/payments/webhook/mollie — verify, dedup, enqueue | `payments`, `backend`, `api` | Pending |
+| 18 | Wire Celery + Redis; implement webhook worker job (fetch PSP state, idempotent transition) | `payments`, `backend`, `celery` | Pending |
+| 19 | Implement POST /api/admin/orders/{token}/refund — staff-only, full refund (uses Refund.request_full_refund) | `payments`, `backend`, `api` | Pending |
+| 20 | Nuxt: redirect to Mollie hosted checkout, return/confirmation page that polls /status | `payments`, `frontend`, `pages` | Pending |
+| 21 | Write integration tests for all PAYMENTS.md verification scenarios | `payments`, `backend`, `testing` | Pending |
 
 ---
 

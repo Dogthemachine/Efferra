@@ -4,6 +4,13 @@ Purpose
 This file is the operational contract for payments integration only.
 Out of scope: VAT/OSS/tax rules, invoicing format rules, shipping rules, frontend tech choice.
 
+Status
+The MVP payment-flow contract layer is implemented in the `payments` Django
+app: `Payment`, `Refund`, `WebhookEvent` models, plus the reservation
+lifecycle and idempotent state-transition helpers on `Order`. HTTP endpoints,
+the real Mollie API client, and Celery worker wiring are still pending and
+will land in subsequent Phase 3 cards.
+
 Primary PSP
 Mollie is the primary PSP. Notes may misspell it as “Morley”; treat as Mollie.
 
@@ -68,108 +75,168 @@ STATE MACHINE (PAYMENTS-RELEVANT)
 Rule
 Only webhooks may transition an Order into paid/refunded states.
 
-Minimum Order statuses used by payments
-pending_payment
-paid
-payment_failed
-canceled
-refund_pending
-refunded
-partially_refunded
+Order statuses used by payments (implemented in orders.models.Order.Status)
+pending          -- order created, stock reserved, no payment session yet
+pending_payment  -- payment session open, awaiting webhook
+paid             -- confirmed paid via webhook
+fulfilled        -- shipped (post-paid business state)
+payment_failed   -- terminal failure of the last attempt; reserved stock released
+expired          -- reservation deadline passed; reserved stock released
+cancelled        -- customer/admin cancel before payment; reserved stock released
+refunded         -- full refund completed (admin-triggered)
 
-Normalized Payment statuses (store provider status + normalize)
-created
-pending
-paid
-failed
-canceled
-expired
-refunded
-partially_refunded
+Normalized Payment statuses (implemented in payments.models.Payment.Status)
+created          -- local row exists, no PSP session opened yet
+pending          -- PSP session opened, awaiting customer
+paid             -- confirmed paid via webhook
+failed           -- terminal failure
+cancelled        -- explicit cancel
+expired          -- PSP session expired
+refunded         -- money returned (full refund, MVP)
 
-Refund statuses (admin-triggered)
+Refund statuses (admin-triggered, full refunds only for MVP)
 requested
 processing
 succeeded
 failed
-canceled
+cancelled
+
+MVP scope note
+- `partially_refunded` is intentionally NOT a status on Order or Payment.
+  Partial refunds are out of scope for MVP and will be added later.
+- Spelling: `cancelled` (UK English) is used throughout the codebase to
+  match the existing `Order.Status` field.
 
 --------------------------------------------------------------------------------
 
-DATA MODEL REQUIREMENTS (MINIMUM)
+DATA MODEL REQUIREMENTS (IMPLEMENTED)
 
-Order prerequisites
-Payments attach to an existing Order.
-Order must have:
-- stable order_id
-- total amount in cents
-- currency (EUR)
+The implemented schema lives in `backend/payments/models.py` and
+`backend/orders/models.py`. The fields below match the actual code; see
+`DOMAIN.md` for full per-field tables.
 
-Payment entity (one row per payment attempt)
-Fields
-id (UUID)
-order_id (FK)
-provider = "mollie"
-provider_payment_id (string)
-checkout_url (string, optional)
-status (enum, normalized)
-amount_cents (int)
-currency = "EUR"
-created_at, updated_at
-raw_provider_payload_last (JSON, optional)
+Order (extended for payments)
+- existing fields: order_number, reference, totals, addresses, etc.
+- status enum (see state machine above)
+- reservation_expires_at (DateTimeField, nullable)
+  -- set at order creation to now + Order.RESERVATION_TIMEOUT (30 min)
+  -- cleared when the order reaches a terminal state
+- helper methods (idempotent, raise InvalidOrderTransition on illegal moves):
+  - mark_pending_payment(), mark_paid(), mark_payment_failed(),
+    mark_cancelled(), mark_expired(), mark_fulfilled(), mark_refunded()
+  - release_stock_reservation()
+  - active_payment()
 
-Refund entity (admin-triggered after inspection)
-Fields
-id (UUID)
-order_id (FK)
-payment_id (FK)
-provider_refund_id (string)
-amount_cents (int)
-status (enum)
-created_by_admin (FK/user id)
-created_at, updated_at
+Payment (one row per payment attempt against an Order)
+- id (UUID, pk)
+- order (FK, PROTECT)
+- provider (default "mollie")
+- provider_payment_id (CharField, blank initially; unique per provider when set)
+- checkout_url (URLField, blank; UX only)
+- amount_cents (PositiveIntegerField; EUR cents)
+- currency (default "EUR")
+- status (enum: see state machine above)
+- idempotency_key (CharField, blank)
+- raw_provider_payload_last (JSONField, default {})
+- created_at, updated_at
+- helper methods: get_or_create_active(order), mark_pending(...),
+  mark_paid(), mark_failed(), mark_cancelled(), mark_expired(),
+  mark_refunded()
+- rule: only one Payment with status in {created, pending} per Order at a
+  time; enforced by get_or_create_active.
 
-WebhookEvent entity (dedup + audit)
-Fields
-id (UUID)
-provider = "mollie"
-provider_event_key (unique per delivery; design must guarantee uniqueness)
-received_at
-processed_at
-processing_result (success/failure + message)
+Refund (admin-triggered, full refunds only for MVP)
+- id (UUID, pk)
+- order (FK, PROTECT)
+- payment (FK, PROTECT)
+- provider_refund_id (CharField, blank initially; unique per payment when set)
+- amount_cents (PositiveIntegerField; MUST equal order.grand_total in cents)
+- currency (default "EUR")
+- status (enum: see state machine above)
+- idempotency_key (CharField, blank)
+- created_by (FK auth.User, SET_NULL)
+- raw_provider_payload_last (JSONField, default {})
+- created_at, updated_at
+- helper methods: request_full_refund(order, created_by=...),
+  mark_processing(...), mark_succeeded(), mark_failed(), mark_cancelled()
+- rule: request_full_refund rejects unpaid orders, orders with no paid
+  payment, and orders that already have an active refund in flight.
+
+WebhookEvent (dedup + audit)
+- id (UUID, pk)
+- provider (default "mollie")
+- provider_event_key (CharField; UNIQUE together with provider)
+- payload (JSONField, default {})
+- received_at, processed_at (nullable)
+- processing_status (enum: pending / success / failed)
+- processing_error (text, blank)
+- helper methods: record_delivery(...), mark_processed_success(),
+  mark_processed_failed(error_message)
+- rule: record_delivery is idempotent — duplicate deliveries return
+  (existing_event, created=False) and MUST NOT trigger side effects again.
 
 --------------------------------------------------------------------------------
 
-API CONTRACT (DJANGO BACKEND, FRONTEND SEPARATE)
+MINIMAL API CONTRACT (MVP, GUEST-FIRST)
 
-Public endpoints
-POST /api/orders/
-Creates an order (guest or logged-in).
+This is the locked direction for the public payment-flow API. HTTP wiring
+is not yet implemented (DRF is still pending in Phase 1/2 follow-up
+cards), but every endpoint below has a corresponding model-level helper
+already in place so the contract is binding.
 
-POST /api/orders/{order_id}/pay/
-Creates Mollie payment/session.
-Returns checkout_url.
+Endpoints (kept intentionally small — do not add more without justification):
 
-GET /api/orders/{order_id}/status/
-Optional polling endpoint for UX.
-Must reflect server-truth (DB state), not return_url assumptions.
+1) POST /api/checkout/submit
+   Purpose
+   - Validate cart.
+   - Create or reuse an Order for this checkout.
+   - Reserve stock at order creation (decrement ProductVariant.stock).
+   - Create or reuse the active Payment via Payment.get_or_create_active.
+   - Return order/payment status + Mollie checkout_url.
+   Rules
+   - Repeated submission of the same cart MUST NOT create duplicate open
+     orders unnecessarily; reuse the existing pending order while it is
+     still within reservation window.
 
-Webhook endpoint (server-to-server)
-POST /api/payments/mollie/webhook/
-Rules
-- Verify authenticity.
-- Persist/deduplicate delivery.
-- Enqueue background processing.
-- Heavy work must not happen inline.
+2) GET /api/orders/{token}/status
+   Purpose
+   - Frontend reads server truth after the customer returns from the
+     PSP. Also usable for short polling.
+   - `token` is the Order.reference UUID, not the sequential id.
+   Rules
+   - Reflects DB state. Never derives "paid" from the return URL.
 
-Admin endpoint
-POST /api/admin/orders/{order_id}/refund/
-Rules
-- Staff-only.
-- Preconditions enforced (return received + inspected + approved; order eligible).
-- Uses idempotency key.
-- Creates Mollie refund and persists provider_refund_id.
-- Final refund state confirmed via webhook or provider fetch.
+3) POST /api/orders/{token}/retry-payment
+   Purpose
+   - Create a new Payment for an Order whose previous attempt is
+     terminal (failed / cancelled / expired).
+   Rules
+   - If an active Payment exists, the response should reuse it instead
+     of creating a new one (Payment.get_or_create_active).
+   - The Order must still be in pending / pending_payment.
+
+4) POST /api/payments/webhook/mollie
+   Purpose
+   - Webhook-driven payment synchronization and order finalization.
+   Rules
+   - Verify authenticity.
+   - Persist via WebhookEvent.record_delivery (dedup by provider_event_key).
+   - Enqueue background processing (Celery, once wired). Heavy work MUST
+     NOT happen inline in the HTTP handler.
+
+Admin endpoint (staff-only, full-refund-only for MVP)
+
+5) POST /api/admin/orders/{token}/refund
+   Purpose
+   - Staff-triggered full refund after inspection.
+   Rules
+   - Staff-only.
+   - Preconditions enforced by Refund.request_full_refund:
+     order must be paid, must have a paid Payment, no active refund.
+   - amount_cents MUST equal order.grand_total in cents.
+   - Uses idempotency_key on the PSP refund call.
+   - Final refund state confirmed via webhook or provider fetch
+     (Refund.mark_succeeded then flips Payment and Order to refunded).
 
 --------------------------------------------------------------------------------
 
@@ -200,8 +267,11 @@ SPECIAL CASES (METHOD BEHAVIOR)
 
 SEPA bank transfer
 - Asynchronous.
-- Order can remain pending_payment for longer.
-- Stock reservation policy must exist (TTL-based reserve; release on expiry/cancel).
+- Order can remain pending_payment for longer than the default 30-minute
+  reservation window. Treatment of long-pending SEPA orders is a parking-lot
+  item -- options include extending reservation_expires_at on
+  mark_pending_payment for SEPA-method payments, or releasing stock and
+  re-checking on webhook arrival. Decide before launching SEPA in production.
 
 Klarna (BNPL)
 - Treat as potentially asynchronous/conditional.
@@ -244,11 +314,12 @@ Required scenarios — payments
 - Payment canceled
 - Payment expired
 
-Required scenarios — refunds
-- Full refund
-- Partial refund (if supported/needed)
+Required scenarios — refunds (MVP: full refunds only)
+- Full refund (admin-triggered)
 - Double-click admin refund action must not double-refund
+  (Refund.request_full_refund rejects duplicate active refunds)
 - Webhook retry after refund must be idempotent
+  (Refund.mark_succeeded is a no-op when already succeeded)
 
 Required scenarios — security
 - Webhook verification enforced
@@ -268,17 +339,26 @@ Acceptance criteria
 
 --------------------------------------------------------------------------------
 
-FIRST IMPLEMENTATION SLICE (CLOUD CODE TASK)
+IMPLEMENTATION SLICES
 
-Scope: payments only. Do not implement VAT/OSS/tax here.
+Slice 1 — MVP payment-flow contract (DONE)
+- Payment, Refund, WebhookEvent models in `backend/payments/`.
+- Order extended with `reservation_expires_at` and idempotent
+  `mark_*` / `release_stock_reservation` / `active_payment` helpers.
+- 30-minute reservation timeout (`Order.RESERVATION_TIMEOUT`).
+- Full-refund-only enforcement on `Refund.request_full_refund`.
+- Tests for the model-level state machine, dedup, and reservation
+  release behavior.
 
-Deliverables
-1) Models: Payment, Refund, WebhookEvent (plus minimal Order fields if missing).
-2) Endpoint: POST /api/orders/{order_id}/pay/ (creates Mollie payment, returns checkout_url).
-3) Endpoint: POST /api/payments/mollie/webhook/ (verify, dedup, enqueue).
-4) Worker: fetch Mollie payment state and idempotently update Payment + Order.
-5) Endpoint: POST /api/admin/orders/{order_id}/refund/ (inspection-approved refund, idempotent).
-6) Tests for the verification contract.
+Slice 2 — HTTP wiring (pending)
+- Add DRF (or equivalent) to backend dependencies.
+- Implement the five endpoints listed above.
+- Wire Celery + Redis and add the webhook worker job that calls
+  `Payment.mark_paid` / `Order.mark_paid` based on PSP fetch.
+- Add real Mollie API client integration.
+
+Slice 3 — End-to-end verification (pending)
+- Run the full verification contract above against Mollie sandbox.
 
 Report format after work
 - Files changed

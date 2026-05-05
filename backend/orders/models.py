@@ -17,14 +17,28 @@ Key rules:
   keeps nullable FK references for traceability as long as the variant exists).
 - Totals (subtotal, shipping, grand_total) are stored on Order to freeze the
   business record at time of purchase.
-- Status transitions are kept simple for MVP; no full workflow engine yet.
+- Stock is reserved at order creation. The order itself is the reservation
+  record: each OrderItem.quantity is decremented from ProductVariant.stock
+  when the order is created, and restored if the payment flow ends in
+  payment_failed / cancelled / expired. mark_paid commits the sale (no
+  stock change). The reservation timeout is 30 minutes, controlled by
+  Order.RESERVATION_TIMEOUT.
+- Webhook is the source of truth for paid/refunded transitions. The
+  helper methods in this module encode the legal transitions and are
+  written to be idempotent so duplicate webhook deliveries are safe.
 - Guest checkout requires no user account.
 """
 
 import uuid
+from datetime import timedelta
 
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+
+class InvalidOrderTransition(Exception):
+    """Raised when an order transition is not allowed from the current status."""
 
 
 class Order(models.Model):
@@ -40,13 +54,33 @@ class Order(models.Model):
     """
 
     class Status(models.TextChoices):
+        # Order placed; stock reserved; no payment session opened yet.
         PENDING = "pending", _("Pending")
-        # Order placed and awaiting payment confirmation via webhook.
+        # Payment session opened; awaiting webhook confirmation.
         PENDING_PAYMENT = "pending_payment", _("Pending payment")
+        # Confirmed paid via webhook. Stock is committed.
         PAID = "paid", _("Paid")
+        # Shipped / dispatched (post-paid business state).
         FULFILLED = "fulfilled", _("Fulfilled / Shipped")
+        # Last payment attempt failed terminally; reserved stock has been released.
+        PAYMENT_FAILED = "payment_failed", _("Payment failed")
+        # Reservation expired before any successful payment; reserved stock released.
+        EXPIRED = "expired", _("Expired")
+        # Customer or admin cancelled before payment; reserved stock released.
         CANCELLED = "cancelled", _("Cancelled")
+        # Full refund completed (admin-triggered, MVP).
         REFUNDED = "refunded", _("Refunded")
+
+    #: Statuses where the order is still working toward a successful payment.
+    PRE_PAID_STATUSES = frozenset({"pending", "pending_payment"})
+
+    #: Statuses where reserved stock should be considered released.
+    RESERVATION_RELEASED_STATUSES = frozenset(
+        {"payment_failed", "expired", "cancelled"}
+    )
+
+    #: Default reservation lifetime; see PAYMENTS.md and CLAUDE.md.
+    RESERVATION_TIMEOUT = timedelta(minutes=30)
 
     # Public reference shown to the customer (e.g., in confirmation emails).
     order_number = models.CharField(
@@ -160,6 +194,22 @@ class Order(models.Model):
         help_text=_("Optional note from the customer at checkout."),
     )
 
+    # --- Stock reservation timing ---
+    # Set when the order is created (with the reserved stock). Cleared when
+    # the order moves to a terminal state (paid, payment_failed, expired,
+    # cancelled, refunded). Compared against `timezone.now()` by the
+    # reservation-sweeper (a Celery beat job, wired in a later phase) to
+    # detect orders whose reservation has lapsed.
+    reservation_expires_at = models.DateTimeField(
+        _("reservation expires at"),
+        null=True,
+        blank=True,
+        help_text=_(
+            "When the stock reservation for this order lapses if no successful "
+            "payment is recorded. Cleared once the order reaches a terminal state."
+        ),
+    )
+
     placed_at = models.DateTimeField(_("placed at"), auto_now_add=True)
     updated_at = models.DateTimeField(_("updated at"), auto_now=True)
 
@@ -196,6 +246,170 @@ class Order(models.Model):
             "region": self.billing_region,
             "country": self.billing_country,
         }
+
+    # ------------------------------------------------------------------
+    # Reservation lifecycle
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def compute_reservation_expiry(cls, *, now=None):
+        """Return the timestamp at which a fresh reservation should expire."""
+        return (now or timezone.now()) + cls.RESERVATION_TIMEOUT
+
+    @property
+    def has_active_reservation(self) -> bool:
+        """True iff the order is still holding reserved stock that is not yet expired."""
+        if self.status not in self.PRE_PAID_STATUSES:
+            return False
+        if self.reservation_expires_at is None:
+            return False
+        return timezone.now() < self.reservation_expires_at
+
+    @property
+    def is_reservation_expired(self) -> bool:
+        """True iff the reservation deadline has passed and stock has not yet been released."""
+        if self.status not in self.PRE_PAID_STATUSES:
+            return False
+        if self.reservation_expires_at is None:
+            return False
+        return timezone.now() >= self.reservation_expires_at
+
+    @transaction.atomic
+    def release_stock_reservation(self) -> bool:
+        """Restore previously-reserved stock to inventory.
+
+        Idempotent: if there is no live reservation (``reservation_expires_at``
+        is None), this is a no-op. Does not change order ``status`` — the
+        caller is responsible for the status transition. Use ``mark_*`` helpers
+        for combined transition + release behavior.
+
+        Returns ``True`` if a release happened, ``False`` if it was a no-op.
+        """
+        if self.reservation_expires_at is None:
+            return False
+        # Local import avoids a hard cross-app cycle at module load time.
+        from catalog.models import ProductVariant
+
+        for item in self.items.select_related("variant_ref"):
+            if item.variant_ref_id is not None:
+                ProductVariant.objects.filter(pk=item.variant_ref_id).update(
+                    stock=models.F("stock") + item.quantity
+                )
+        self.reservation_expires_at = None
+        self.save(update_fields=["reservation_expires_at", "updated_at"])
+        return True
+
+    # ------------------------------------------------------------------
+    # Status transitions (idempotent; webhook is the source of truth)
+    # ------------------------------------------------------------------
+
+    def _assert_transition(self, new_status: "Order.Status", *, allowed_from) -> None:
+        if self.status not in allowed_from:
+            raise InvalidOrderTransition(
+                f"Cannot move order {self.pk} from {self.status} to {new_status}"
+            )
+
+    @transaction.atomic
+    def mark_pending_payment(self) -> bool:
+        """Transition to pending_payment when a payment session is opened.
+
+        Idempotent: returns False if already in pending_payment.
+        """
+        if self.status == self.Status.PENDING_PAYMENT:
+            return False
+        self._assert_transition(
+            self.Status.PENDING_PAYMENT, allowed_from={self.Status.PENDING}
+        )
+        self.status = self.Status.PENDING_PAYMENT
+        self.save(update_fields=["status", "updated_at"])
+        return True
+
+    @transaction.atomic
+    def mark_paid(self) -> bool:
+        """Confirm payment success (must originate from a webhook).
+
+        Idempotent: no-op when already paid. Stock was decremented at order
+        creation, so this method commits the sale by clearing the reservation
+        timer; it does not change ``ProductVariant.stock``.
+        """
+        if self.status == self.Status.PAID:
+            return False
+        self._assert_transition(
+            self.Status.PAID,
+            allowed_from={self.Status.PENDING, self.Status.PENDING_PAYMENT},
+        )
+        self.status = self.Status.PAID
+        self.reservation_expires_at = None
+        self.save(update_fields=["status", "reservation_expires_at", "updated_at"])
+        return True
+
+    @transaction.atomic
+    def mark_payment_failed(self) -> bool:
+        """Move to payment_failed and release reserved stock. Idempotent."""
+        return self._terminal_pre_paid_release(self.Status.PAYMENT_FAILED)
+
+    @transaction.atomic
+    def mark_cancelled(self) -> bool:
+        """Customer/admin cancelled before payment. Releases reserved stock. Idempotent."""
+        return self._terminal_pre_paid_release(self.Status.CANCELLED)
+
+    @transaction.atomic
+    def mark_expired(self) -> bool:
+        """Reservation deadline passed. Releases reserved stock. Idempotent."""
+        return self._terminal_pre_paid_release(self.Status.EXPIRED)
+
+    def _terminal_pre_paid_release(self, target: "Order.Status") -> bool:
+        if self.status == target:
+            return False
+        self._assert_transition(
+            target,
+            allowed_from={self.Status.PENDING, self.Status.PENDING_PAYMENT},
+        )
+        self.release_stock_reservation()
+        self.status = target
+        self.save(update_fields=["status", "updated_at"])
+        return True
+
+    @transaction.atomic
+    def mark_fulfilled(self) -> bool:
+        """Mark a paid order as shipped/fulfilled."""
+        if self.status == self.Status.FULFILLED:
+            return False
+        self._assert_transition(self.Status.FULFILLED, allowed_from={self.Status.PAID})
+        self.status = self.Status.FULFILLED
+        self.save(update_fields=["status", "updated_at"])
+        return True
+
+    @transaction.atomic
+    def mark_refunded(self) -> bool:
+        """Mark order as fully refunded (called by Refund.mark_succeeded)."""
+        if self.status == self.Status.REFUNDED:
+            return False
+        self._assert_transition(
+            self.Status.REFUNDED,
+            allowed_from={self.Status.PAID, self.Status.FULFILLED},
+        )
+        self.status = self.Status.REFUNDED
+        self.save(update_fields=["status", "updated_at"])
+        return True
+
+    # ------------------------------------------------------------------
+    # Payment helpers
+    # ------------------------------------------------------------------
+
+    def active_payment(self):
+        """Return the most recent active (non-terminal) payment, or None.
+
+        MVP rule: at most one active payment exists per order at any time.
+        Use ``Payment.get_or_create_active`` to honor this on creation.
+        """
+        from payments.models import Payment
+
+        return (
+            self.payments.filter(status__in=Payment.ACTIVE_STATUSES)
+            .order_by("-created_at")
+            .first()
+        )
 
 
 class OrderItem(models.Model):

@@ -4,7 +4,7 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 
 ## Current status
 
-**Phase 0 complete. Phase 1 catalog domain and Phase 2 cart/order domain models implemented.**
+**Phase 0 complete. Phase 1 catalog domain and Phase 2 cart/order domain models implemented. Phase 3 payment-flow contract layer implemented.**
 
 - Django backend initialized in `backend/`.
 - Nuxt frontend initialized in `frontend/` with i18n skeleton (4 locales).
@@ -12,16 +12,20 @@ Luxury artistic candle webshop. NL-first, EU-wide shipping.
 - Catalog domain models in place: `Collection`, `Product`, `ProductVariant`, `ProductImage`.
 - Cart domain models in place: `Cart`, `CartItem` (session-based, token-identified).
 - Order domain models in place: `Order`, `OrderItem` (guest checkout, full purchase snapshot).
+- Payment-flow contract layer in place: `Payment`, `Refund`, `WebhookEvent`
+  models, plus the 30-minute stock reservation lifecycle and idempotent
+  state-transition helpers on `Order`. HTTP endpoints, Celery worker, and
+  the real Mollie API client are still pending (next Phase 3 cards).
 - No production deployment configuration exists yet.
 
 ## Stack
 
 | Layer    | Technology           | Status      |
 |----------|----------------------|-------------|
-| Backend  | Django 5.2 / Python  | Domain models active (catalog, cart, orders) |
+| Backend  | Django 5.2 / Python  | Domain models active (catalog, cart, orders, payments contract layer) |
 | Frontend | Nuxt 3.x / pnpm     | Initialized |
 | Database | PostgreSQL           | Configured for local dev  |
-| Payments | Mollie               | Not started |
+| Payments | Mollie               | Contract layer (models + state machine) implemented; HTTP/Celery/PSP integration pending |
 
 ## Repository structure
 
@@ -32,7 +36,8 @@ Efferra/
 │   ├── core/               # Bootstrap app (health endpoint)
 │   ├── catalog/            # Catalog domain: Collection, Product, ProductVariant, ProductImage
 │   ├── cart/               # Cart domain: Cart, CartItem (session-based, token-identified)
-│   ├── orders/             # Order domain: Order, OrderItem (guest checkout, purchase snapshot)
+│   ├── orders/             # Order domain: Order, OrderItem (guest checkout, purchase snapshot, reservation lifecycle)
+│   ├── payments/           # Payment-flow contract: Payment, Refund, WebhookEvent + state machine
 │   ├── manage.py
 │   ├── pyproject.toml      # Python dependencies (Poetry)
 │   ├── poetry.lock         # Locked dependency versions
@@ -253,7 +258,7 @@ make build-frontend   # Generate static Nuxt site only
 
 ### What `make test` actually does today
 
-- **Backend** (`test-backend`): runs `python manage.py test` — the Django test runner discovers and executes all tests. Tests exist for `cart` and `orders` domain models (18 tests). The `catalog` app has tests stubs ready but no written tests yet.
+- **Backend** (`test-backend`): runs `python manage.py test` — the Django test runner discovers and executes all tests. Tests exist for `cart`, `orders`, and `payments` (51 tests covering domain models, the reservation lifecycle, the state machine, webhook deduplication, and full-refund-only refund behavior). The `catalog` app has test stubs ready but no written tests yet.
 - **Frontend** (`test-frontend`): runs `pnpm build` — a full Nuxt production build that validates TypeScript types and module resolution. No dedicated test runner (e.g., Vitest) is configured yet.
 
 ### What the build target produces
@@ -365,13 +370,31 @@ Order
   ├── shipping address snapshot (embedded fields)
   ├── billing address snapshot (or billing_same_as_shipping flag)
   ├── frozen totals (subtotal, shipping_total, grand_total)
-  ├── status (pending → pending_payment → paid → fulfilled / cancelled / refunded)
+  ├── reservation_expires_at (30-min stock reservation deadline)
+  ├── status (pending → pending_payment → paid → fulfilled
+  │           / payment_failed / expired / cancelled / refunded)
   └── OrderItem (one per line — full purchase snapshot, authoritative record)
 ```
 
 - `OrderItem` stores full snapshot of product name, SKU, material, color, finish, unit price, quantity, line total.
 - Nullable FK references (`product_ref`, `variant_ref`) exist for traceability but are not authoritative.
 - Totals are frozen at order creation time and never recalculated from live catalog.
+- Stock is reserved at order creation (`ProductVariant.stock` decremented). Reservation lasts 30 minutes (`Order.RESERVATION_TIMEOUT`). The `mark_payment_failed` / `mark_cancelled` / `mark_expired` helpers release reserved stock automatically; `mark_paid` commits the sale.
+
+### Payments contract layer
+
+```
+Order ─┬─< Payment   (one row per payment attempt; UUID pk; status machine)
+       └─< Refund    (admin-triggered; full refund only; UUID pk)
+
+WebhookEvent (provider × provider_event_key; UNIQUE — for delivery dedup)
+```
+
+- `Payment.get_or_create_active(order)` enforces the "one active payment per order" rule.
+- All `mark_*` transition helpers are idempotent.
+- `WebhookEvent.record_delivery(...)` deduplicates duplicate provider deliveries.
+- `Refund.request_full_refund(order)` enforces full-refund-only MVP scope.
+- See `DOMAIN.md` and `PAYMENTS.md` for the full contract.
 
 ---
 
